@@ -1,0 +1,52 @@
+[market]
+symbol = "BTC-PERP"
+base_asset = "BTC"
+quote_asset = "USD"
+tick_size = 1
+lot_size = 1
+min_order_size = 1
+max_order_size = 1000000
+enabled = true
+
+[risk]
+max_leverage = 20.0
+maintenance_margin_rate = 0.05
+initial_margin_rate = 0.10
+max_position_size = 10000000
+liquidation_fee_rate = 0.005
+
+[fees]
+maker_fee_rate = 0.0002
+taker_fee_rate = 0.0005
+liquidation_fee_rate = 0.005
+
+[funding]
+funding_interval = "8h"
+max_funding_rate = 0.0005
+premium_ema_alpha = 0.05
+
+[kafka]
+brokers = "localhost:9092"
+topic = "events"
+group_id = "perpinfra"
+
+[[price_sources]]
+source_id = "binance"
+symbol = "btcusdt"
+weight = 1.0
+staleness_threshold = "5s"
+enabled = true
+
+[[price_sources]]
+source_id = "coinbase"
+symbol = "BTC-USD"
+weight = 1.0
+staleness_threshold = "5s"
+enabled = true
+
+[[price_sources]]
+source_id = "kraken"
+symbol = "XBTUSD"
+weight = 1.0
+staleness_threshold = "5s"
+enabled = true
