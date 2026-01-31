@@ -29,23 +29,28 @@ define_id_type!(LiquidationId);
 define_id_type!(EntryId);
 define_id_type!(EventId);
 define_id_type!(OperatorId);
+define_id_type!(AccountId);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct AccountId(pub Uuid);
-
-impl AccountId {
-    pub fn new() -> Self {
-        AccountId(Uuid::new_v4())
-    }
-
-    pub fn from_user(user_id: UserId) -> Self {
-        // In practice, might derive deterministically from user_id
-        AccountId(Uuid::new_v4())
+impl UserId {
+    pub fn from_string(s: &str) -> Result<Self, uuid::Error> {
+        Ok(UserId(Uuid::parse_str(s)?))
     }
 }
 
-impl fmt::Display for AccountId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+impl MarketId {
+    pub fn from_string(s: &str) -> Result<Self, uuid::Error> {
+        Ok(MarketId(Uuid::parse_str(s)?))
+    }
+
+    pub fn btc_perp() -> Self {
+        MarketId(Uuid::from_u128(1))
+    }
+}
+
+impl AccountId {
+    pub fn from_user(user_id: UserId) -> Self {
+        // Deterministic derivation: use the same UUID as the user
+        // This ensures consistent account lookup across system restarts
+        AccountId(user_id.0)
     }
 }

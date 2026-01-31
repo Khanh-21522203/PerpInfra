@@ -7,7 +7,6 @@ pub struct RiskConfig {
     pub maintenance_margin_rate: f64,
     pub initial_margin_rate: f64,
     pub max_position_size: Quantity,
-    pub liquidation_fee_rate: f64,
 }
 
 impl Default for RiskConfig {
@@ -15,9 +14,8 @@ impl Default for RiskConfig {
         RiskConfig {
             max_leverage: 20.0,
             maintenance_margin_rate: 0.05,  // 5%
-            initial_margin_rate: 0.10,      // 10%
-            max_position_size: Quantity::from_i64(10_000_000),
-            liquidation_fee_rate: 0.005,    // 0.5%
+            initial_margin_rate: 0.10,      // 10% (1/max_leverage for 10x effective)
+            max_position_size: Quantity::from_i64(1000_00000000), // 1000 BTC
         }
     }
 }

@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::error::{Error, Result};
 use crate::events::base::BaseEvent;
 use crate::events::funding::FundingEvent;
@@ -13,6 +14,7 @@ use std::time::Duration;
 pub struct FundingApplicator {
     rate_calculator: FundingRateCalculator,
     funding_interval: Duration,
+    halted: AtomicBool,
 }
 
 impl FundingApplicator {
@@ -23,6 +25,7 @@ impl FundingApplicator {
         FundingApplicator {
             rate_calculator,
             funding_interval,
+            halted: AtomicBool::new(false),
         }
     }
 
@@ -34,6 +37,12 @@ impl FundingApplicator {
         balance_provider: &mut dyn BalanceProvider,
         market_id: MarketId,
     ) -> Result<FundingEvent> {
+
+        if self.halted.load(Ordering::SeqCst) {
+            tracing::warn!("FundingApplicator is halted, skipping funding");
+            return Err(Error::KillSwitchActive);
+        }
+
         // Calculate funding rate
         let premium = self.rate_calculator.calculate_premium(mark_price, index_price);
         let funding_rate = self.rate_calculator.calculate_rate(premium, index_price);
@@ -72,5 +81,19 @@ impl FundingApplicator {
             funding_interval: self.funding_interval,
             payments,
         })
+    }
+
+    pub fn halt(&self) {
+        self.halted.store(true, Ordering::SeqCst);
+        tracing::warn!("FundingApplicator HALTED");
+    }
+
+    pub fn resume(&self) {
+        self.halted.store(false, Ordering::SeqCst);
+        tracing::info!("FundingApplicator RESUMED");
+    }
+
+    pub fn is_halted(&self) -> bool {
+        self.halted.load(Ordering::SeqCst)
     }
 }

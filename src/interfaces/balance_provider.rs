@@ -1,5 +1,5 @@
-use crate::settlement::accounts::Account;
 use crate::error::Result;
+use crate::types::account::Account;
 use crate::types::balance::Balance;
 use crate::types::ids::UserId;
 

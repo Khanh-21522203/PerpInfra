@@ -1,6 +1,7 @@
 use crate::config::risk::RiskConfig;
 use crate::error::{Error, InvariantViolation, Result};
 use crate::interfaces::balance_provider::BalanceProvider;
+use crate::liquidation::priority_queue::LiquidationPriorityQueue;
 use crate::matching::order_book::OrderBook;
 use crate::risk::margin::MarginCalculator;
 use crate::risk::pnl::PnLCalculator;
@@ -183,6 +184,79 @@ impl InvariantChecks {
                     ),
                 }));
             }
+        }
+
+        Ok(())
+    }
+
+    /// INV-007: Check position-balance consistency
+    /// Per docs/architecture/invariants.md Section 2.7
+    pub fn check_position_balance_consistency(
+        balance_manager: &BalanceManager,
+        positions: &[crate::types::position::Position],
+        liquidation_queue: &LiquidationPriorityQueue,
+        mark_price: Price,
+    ) -> Result<()> {
+
+        let margin_calc = MarginCalculator::new(RiskConfig::default());
+
+        for position in positions {
+            if position.is_flat() {
+                continue;
+            }
+
+            let account = balance_manager.get_account(position.user_id)?;
+            let unrealized_pnl = PnLCalculator::calculate_unrealized_pnl(position, mark_price);
+            let collateral = account.balance.to_i64() + unrealized_pnl.to_i64();
+            let maintenance_margin = margin_calc.calculate_maintenance_margin(
+                position.abs_size(),
+                mark_price,
+            );
+
+            // If collateral < maintenance margin, user MUST be in liquidation queue
+            if collateral < maintenance_margin.to_i64() {
+                let in_queue = liquidation_queue.contains(position.user_id);
+                if !in_queue {
+                    return Err(Error::InvariantViolation(InvariantViolation {
+                        invariant: "INV-007: position_balance_consistency",
+                        details: format!(
+                            "User {:?} below maintenance margin but not in liquidation queue: collateral={}, maintenance={}",
+                            position.user_id,
+                            collateral,
+                            maintenance_margin.to_i64()
+                        ),
+                    }));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// INV-008: Check double-entry balance
+    /// Per docs/architecture/invariants.md Section 2.8
+    pub fn check_double_entry_balance(
+        ledger: &[crate::settlement::ledger::LedgerEntry],
+    ) -> Result<()> {
+        let total_debits: i64 = ledger.iter()
+            .filter(|e| e.amount.to_i64() > 0)
+            .map(|e| e.amount.to_i64())
+            .sum();
+
+        let total_credits: i64 = ledger.iter()
+            .filter(|e| e.amount.to_i64() < 0)
+            .map(|e| e.amount.to_i64().abs())
+            .sum();
+
+        if total_debits != total_credits {
+            return Err(Error::InvariantViolation(InvariantViolation {
+                invariant: "INV-008: double_entry_balance",
+                details: format!(
+                    "Ledger debits and credits don't match: debits={}, credits={}",
+                    total_debits,
+                    total_credits
+                ),
+            }));
         }
 
         Ok(())

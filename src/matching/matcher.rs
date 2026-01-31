@@ -1,7 +1,7 @@
 use crate::config::fees::FeeConfig;
 use crate::error::Result;
 use crate::events::base::BaseEvent;
-use crate::events::order::Side;
+use crate::events::order::{OrderType, Side};
 use crate::events::trade::{Fee, TradeEvent};
 use crate::interfaces::balance_provider::BalanceProvider;
 use crate::matching::order_book::{Order, OrderBook};
@@ -12,7 +12,7 @@ use crate::types::price::Price;
 use crate::types::quantity::Quantity;
 use crate::types::ratio::Ratio;
 use std::cmp::Reverse;
-use crate::observability::metrics::{MATCHING_LATENCY, TRADES_EXECUTED, TRADE_VOLUME};
+use crate::observability::metrics::{MATCHING_LATENCY, ORDERS_REJECTED, TRADES_EXECUTED, TRADE_VOLUME};
 
 pub struct Matcher {
     order_book: OrderBook,
@@ -25,12 +25,20 @@ impl Matcher {
         Matcher { order_book, fee_config, market_id }
     }
 
-    pub fn match_order(&mut self, order: Order, balance_provider: &mut dyn BalanceProvider, mark_price: Price) -> Result<Vec<TradeEvent>> {
+    pub fn match_order(&mut self, order: &Order, balance_provider: &mut dyn BalanceProvider, mark_price: Price) -> Result<Vec<TradeEvent>> {
         // Observability: Start timing
-        let _timer = MATCHING_LATENCY.start_timer();
+        let order_type_label = match order.order_type {
+            OrderType::Market => "market",
+            OrderType::Limit => "limit",
+        };
+        let _timer = MATCHING_LATENCY.with_label_values(&[order_type_label]).start_timer();
 
         let mut trades = Vec::new();
         let mut remaining = order.quantity;
+        let initial_best_price = match order.side {
+            Side::Buy => self.order_book.best_ask(),
+            Side::Sell => self.order_book.best_bid(),
+        };
 
         while remaining > Quantity::zero() {
             // Get best opposite price
@@ -43,6 +51,46 @@ impl Matcher {
                 Some(p) => p,
                 None => break,  // No more liquidity
             };
+
+            // ADDED: Slippage protection for market orders
+            // Per docs/architecture/matching-execution.md Section 6.2
+            if order.order_type == crate::events::order::OrderType::Market {
+                if let Some(slippage_limit) = order.slippage_limit {
+                    if let Some(initial_price) = initial_best_price {
+                        let slippage = match order.side {
+                            Side::Buy => {
+                                // For buy orders, slippage is (current_price - initial_price) / initial_price
+                                if best_price > initial_price {
+                                    let diff = best_price.to_i64() - initial_price.to_i64();
+                                    (diff as f64) / (initial_price.to_i64() as f64)
+                                } else {
+                                    0.0
+                                }
+                            }
+                            Side::Sell => {
+                                // For sell orders, slippage is (initial_price - current_price) / initial_price
+                                if initial_price > best_price {
+                                    let diff = initial_price.to_i64() - best_price.to_i64();
+                                    (diff as f64) / (initial_price.to_i64() as f64)
+                                } else {
+                                    0.0
+                                }
+                            }
+                        };
+
+                        if slippage > slippage_limit.to_f64() {
+                            // Slippage exceeded, reject remaining quantity
+                            tracing::warn!(
+                                "Market order {} slippage exceeded: {:.4}% > {:.4}%",
+                                order.order_id,
+                                slippage * 100.0,
+                                slippage_limit.to_f64() * 100.0
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
 
             // Check if price crosses
             if !self.price_crosses(order.side, order.price, best_price) {
@@ -116,7 +164,7 @@ impl Matcher {
 
                 // Observability: Record trade metrics
                 TRADES_EXECUTED.inc();
-                TRADE_VOLUME.inc_by(fill_qty.to_i64() as f64);
+                TRADE_VOLUME.with_label_values(&["default"]).inc_by(fill_qty.to_i64() as f64);
 
                 // Update orders
                 maker_order.filled = maker_order.filled + fill_qty;

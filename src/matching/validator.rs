@@ -1,5 +1,5 @@
 use crate::config::market::MarketConfig;
-use crate::events::order::{OrderSubmit, OrderType};
+use crate::events::order::{OrderSubmit, OrderType, Side};
 use crate::error::{Error, Result};
 use crate::types::price::Price;
 use crate::types::quantity::Quantity;
@@ -16,7 +16,12 @@ impl OrderValidator {
     pub fn validate(&self, order: &OrderSubmit) -> Result<()> {
         // Observability: Record order submission
         use crate::observability::metrics::*;
-        ORDERS_SUBMITTED.inc();
+        let side = match order.side {
+            Side::Buy => "buy",
+            Side::Sell => "sell",
+        };
+        let order_type = if order.price.is_some() { "limit" } else { "market" };
+        ORDERS_SUBMITTED.with_label_values(&[side, order_type]).inc();
 
         // Validate price (if limit order)
         if let Some(price) = order.price {
@@ -31,7 +36,13 @@ impl OrderValidator {
             Ok(_) => Ok(()),
             Err(e) => {
                 // Observability: Record rejection
-                ORDERS_REJECTED.inc();
+                let reason = match &e {
+                    Error::InsufficientMargin { .. } => "insufficient_margin",
+                    Error::InvalidPrice => "invalid_price",
+                    Error::InvalidQuantity => "invalid_quantity",
+                    _ => "other",
+                };
+                ORDERS_REJECTED.with_label_values(&[reason]).inc();
                 Err(e)
             }
         }

@@ -1,11 +1,10 @@
-use crate::settlement::accounts::Account;
 use crate::types::ids::MarketId;
 use crate::types::position::Position;
 use crate::types::price::Price;
 use crate::types::timestamp::Timestamp;
-use num_traits::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use crate::types::account::Account;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snapshot {

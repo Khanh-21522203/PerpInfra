@@ -1,6 +1,6 @@
 use thiserror::Error;
 use crate::types::balance::Balance;
-use crate::types::ids::{AccountId, OrderId};
+use crate::types::ids::{AccountId, EventId, OrderId};
 use crate::types::price::Price;
 use crate::types::quantity::Quantity;
 
@@ -22,6 +22,17 @@ pub enum Error {
     #[error("Invalid checksum")]
     InvalidChecksum,
 
+    #[error("Checksum mismatch for event: {event_id:?}")]
+    ChecksumMismatch {
+        event_id: EventId,
+    },
+
+    #[error("Invalid event payload: expected {expected}, found {found}")]
+    InvalidEventPayload {
+        expected: String,
+        found: String,
+    },
+    
     #[error("No more events available")]
     NoMoreEvents,
 
@@ -58,6 +69,9 @@ pub enum Error {
 
     #[error("Circuit breaker triggered: {0:?}")]
     CircuitBreakerTriggered(CircuitBreakerReason),
+
+    #[error("Max reconnect attempts exceeded")]
+    MaxReconnectAttemptsExceeded,
 
     // Order Validation Errors
     #[error("Invalid tick size")]
@@ -208,6 +222,13 @@ pub enum Error {
     // IO Errors
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+
+    // Event Version Errors
+    #[error("Unsupported event version: {event_version}, max supported: {max_supported}")]
+    UnsupportedEventVersion {
+        event_version: u32,
+        max_supported: u32,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

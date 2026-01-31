@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::interfaces::balance_provider::BalanceProvider;
-use crate::settlement::accounts::Account;
+use crate::types::account::Account;
 use crate::settlement::ledger::{EntryType, Ledger, LedgerEntry};
 use crate::types::balance::Balance;
 use crate::types::ids::{AccountId, UserId};

@@ -7,6 +7,16 @@ use crate::types::quantity::Quantity;
 use crate::types::ratio::Ratio;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LiquidationTriggered {
+    pub base: BaseEvent,
+    pub user_id: UserId,
+    pub position_size: Quantity,
+    pub mark_price: Price,
+    pub maintenance_margin: Balance,
+    pub account_value: Balance,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LiquidationEvent {
     pub base: BaseEvent,
     pub liquidation_id: LiquidationId,

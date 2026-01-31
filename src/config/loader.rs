@@ -1,10 +1,10 @@
-use config::{Config, File, Environment};
-use crate::config::*;
-use crate::error::Result;
-use serde::Deserialize;
 use crate::config::fees::FeeConfig;
 use crate::config::market::MarketConfig;
 use crate::config::risk::RiskConfig;
+use crate::config::*;
+use crate::error::{Error, Result};
+use config::{Config, Environment, File};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct AppConfig {
@@ -30,9 +30,9 @@ impl AppConfig {
             .add_source(File::with_name(&format!("config/{}", env)).required(false))
             .add_source(Environment::with_prefix("PERPINFRA"))
             .build()
-            .map_err(|e| crate::error::Error::ConfigError(e.to_string()))?;
+            .map_err(|e| Error::ConfigError(e.to_string()))?;
 
         config.try_deserialize()
-            .map_err(|e| crate::error::Error::ConfigError(e.to_string()))
+            .map_err(|e| Error::ConfigError(e.to_string()))
     }
 }

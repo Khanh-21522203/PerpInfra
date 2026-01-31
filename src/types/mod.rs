@@ -6,3 +6,4 @@ pub mod ratio;
 pub mod ids;
 pub mod position;
 pub mod funding_rate;
+pub mod account;

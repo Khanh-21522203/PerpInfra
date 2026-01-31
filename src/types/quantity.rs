@@ -9,12 +9,22 @@ use std::ops::{Add, Mul, Sub};
 pub struct Quantity(i64);  // Base units
 
 impl Quantity {
+    const MULTIPLIER: i64 = 100_000_000;
+
     pub fn from_i64(value: i64) -> Self {
         Quantity(value)
     }
 
     pub fn to_i64(&self) -> i64 {
         self.0
+    }
+
+    pub fn from_f64(value: f64) -> Self {
+        Quantity((value * Self::MULTIPLIER as f64).round() as i64)
+    }
+
+    pub fn to_f64(&self) -> f64 {
+        self.0 as f64 / Self::MULTIPLIER as f64
     }
 
     pub fn zero() -> Self {

@@ -6,6 +6,8 @@ use std::fmt;
 pub struct Balance(i64);  // Signed balance in base units
 
 impl Balance {
+    const MULTIPLIER: i64 = 100_000_000;
+
     pub fn from_i64(value: i64) -> Self {
         Balance(value)
     }
@@ -15,11 +17,11 @@ impl Balance {
     }
 
     pub fn from_f64(value: f64) -> Self {
-        Balance(value as i64)
+        Balance((value * Self::MULTIPLIER as f64).round() as i64)
     }
 
     pub fn to_f64(&self) -> f64 {
-        self.0 as f64
+        self.0 as f64 / Self::MULTIPLIER as f64
     }
 
     pub fn zero() -> Self {

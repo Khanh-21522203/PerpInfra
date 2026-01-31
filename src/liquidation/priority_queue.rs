@@ -1,6 +1,7 @@
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use crate::liquidation::detector::LiquidationCandidate;
+use crate::types::ids::UserId;
 
 pub struct LiquidationPriorityQueue {
     heap: BinaryHeap<PriorityCandidate>,
@@ -27,6 +28,10 @@ impl LiquidationPriorityQueue {
 
     pub fn len(&self) -> usize {
         self.heap.len()
+    }
+
+    pub fn contains(&self, user_id: UserId) -> bool {
+        self.heap.iter().any(|p| p.0.user_id == user_id)
     }
 }
 

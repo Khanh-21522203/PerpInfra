@@ -1,6 +1,6 @@
 use crate::events::order::{OrderRejected, OrderSubmit};
 use crate::events::trade::TradeEvent;
-use crate::settlement::accounts::Account;
+use crate::types::account::Account;
 use crate::types::balance::Balance;
 use crate::types::ids::UserId;
 use crate::types::position::Position;

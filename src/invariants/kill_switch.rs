@@ -26,11 +26,6 @@ impl KillSwitch {
             format!("KILL SWITCH ACTIVATED: {}", reason)
         );
 
-        // Halt all engines
-        crate::utils::helper::halt_order_processor();
-        crate::utils::helper::halt_liquidation_engine();
-        crate::utils::helper::halt_funding_engine();
-
         // Dump state for forensics
         crate::utils::helper::dump_system_state_for_forensics();
     }
@@ -47,10 +42,5 @@ impl KillSwitch {
 
         self.active.store(false, Ordering::SeqCst);
         tracing::warn!("Kill switch deactivated by operator {:?}", operator_id);
-
-        // Resume engines
-        crate::utils::helper::resume_order_processor();
-        crate::utils::helper::resume_liquidation_engine();
-        crate::utils::helper::resume_funding_engine();
     }
 }

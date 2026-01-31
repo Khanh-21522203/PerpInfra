@@ -1,10 +1,11 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use crate::error::{Error, Result};
-use crate::events::order::{Side, TimeInForce};
+use crate::events::order::{OrderType, Side, TimeInForce};
 use crate::types::ids::{OrderId, UserId};
 use crate::types::price::Price;
 use crate::types::quantity::Quantity;
+use crate::types::ratio::Ratio;
 use crate::types::timestamp::Timestamp;
 
 pub struct OrderBook {
@@ -24,6 +25,7 @@ pub struct Order {
     pub order_id: OrderId,
     pub user_id: UserId,
     pub side: Side,
+    pub order_type: OrderType,
     pub price: Price,
     pub quantity: Quantity,
     pub filled: Quantity,
@@ -31,6 +33,7 @@ pub struct Order {
     pub time_in_force: TimeInForce,
     pub reduce_only: bool,
     pub post_only: bool,
+    pub slippage_limit: Option<Ratio>,
 }
 
 impl OrderBook {

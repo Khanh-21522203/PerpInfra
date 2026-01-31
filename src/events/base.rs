@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
 use uuid::Uuid;
 use crate::error::{Error, Result};
-use crate::types::ids::{MarketId, UserId};
+use crate::types::ids::{EventId, MarketId, UserId};
 use crate::types::timestamp::Timestamp;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -14,11 +15,13 @@ pub struct BaseEvent {
     pub sequence: u64,
     pub correlation_id: CorrelationId,
     pub metadata: EventMetadata,
+    pub payload: EventPayload,      // FIX IGD-S-037: Typed payload for event-specific data
+    pub checksum: String,           // FIX IGD-S-002: Integrity verification
 }
 
 impl BaseEvent {
     pub fn new(event_type: EventType, market_id: MarketId) -> Self {
-        BaseEvent {
+        let mut event = BaseEvent {
             event_id: EventId::new(),
             event_type,
             version: 1,
@@ -27,16 +30,36 @@ impl BaseEvent {
             sequence: 0, // Set by event log
             correlation_id: CorrelationId::new(),
             metadata: EventMetadata::default(),
-        }
+            payload: EventPayload::Empty,  // FIX IGD-S-037
+            checksum: String::new(),       // FIX IGD-S-002
+        };
+        event.checksum = event.calculate_checksum();
+        event
     }
-}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EventId(pub Uuid);
+    pub fn calculate_checksum(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(self.event_id.0.as_bytes());
+        hasher.update(self.sequence.to_le_bytes());
+        hasher.update(self.timestamp.physical.to_le_bytes());
+        hasher.update(format!("{:?}", self.event_type).as_bytes());
+        hasher.finalize()
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect()
+    }
 
-impl EventId {
-    pub fn new() -> Self {
-        EventId(Uuid::new_v4())
+    /// Verify event checksum
+    pub fn verify_checksum(&self) -> bool {
+        self.checksum == self.calculate_checksum()
+    }
+
+    /// Create event with typed payload
+    pub fn with_payload(event_type: EventType, market_id: MarketId, payload: EventPayload) -> Self {
+        let mut event = Self::new(event_type, market_id);
+        event.payload = payload;
+        event.checksum = event.calculate_checksum();
+        event
     }
 }
 
@@ -70,6 +93,18 @@ impl Default for EventMetadata {
             idempotency_key: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum EventPayload {
+    Empty,
+    OrderSubmit(Box<crate::events::order::OrderSubmit>),
+    OrderCancel(Box<crate::events::order::OrderCancel>),
+    Trade(Box<crate::events::trade::TradeEvent>),
+    PriceSnapshot(Box<crate::events::price::PriceSnapshot>),
+    Funding(Box<crate::events::funding::FundingEvent>),
+    Liquidation(Box<crate::events::liquidation::LiquidationTriggered>),
+    BalanceUpdate(Box<crate::events::balance::BalanceUpdate>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

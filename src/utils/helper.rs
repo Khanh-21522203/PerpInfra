@@ -1,17 +1,14 @@
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{Ordering};
+use std::sync::{RwLock};
 use uuid::Uuid;
-use crate::events::base::EventId;
-use crate::types::ids::{EntryId, LiquidationId, OperatorId, OrderId, TradeId};
+use crate::types::ids::{EntryId, EventId, LiquidationId, OperatorId, OrderId, TradeId};
 
 // Global state for engine control
 lazy_static::lazy_static! {
-    static ref ORDER_PROCESSOR_HALTED: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    static ref LIQUIDATION_ENGINE_HALTED: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    static ref FUNDING_ENGINE_HALTED: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    static ref AUTHORIZED_OPERATORS: std::sync::RwLock<std::collections::HashSet<OperatorId>> =
-        std::sync::RwLock::new(std::collections::HashSet::new());
+    static ref AUTHORIZED_OPERATORS: RwLock<HashSet<OperatorId>> =
+        RwLock::new(HashSet::new());
 }
 
 /// Get current timestamp in milliseconds since epoch
@@ -117,14 +114,12 @@ pub fn dump_system_state_for_forensics() {
     let timestamp = current_timestamp_ms();
     let filename = format!("forensics_dump_{}.json", timestamp);
 
-    // Collect system state
+    // Collect system state (basic info only - engines own their halt state)
     let state = serde_json::json!({
         "timestamp": timestamp,
-        "order_processor_halted": ORDER_PROCESSOR_HALTED.load(Ordering::SeqCst),
-        "liquidation_engine_halted": LIQUIDATION_ENGINE_HALTED.load(Ordering::SeqCst),
-        "funding_engine_halted": FUNDING_ENGINE_HALTED.load(Ordering::SeqCst),
         "memory_usage": get_memory_usage(),
         "thread_count": get_thread_count(),
+        "kill_switch_active": crate::KILL_SWITCH.load(Ordering::SeqCst),
     });
 
     // Write to file
@@ -169,64 +164,43 @@ pub fn remove_authorized_operator(operator_id: OperatorId) {
     }
 }
 
-/// Halt order processor - IMPLEMENTED
-pub fn halt_order_processor() {
-    ORDER_PROCESSOR_HALTED.store(true, Ordering::SeqCst);
-    tracing::warn!("Order processor HALTED");
-}
-
-/// Halt liquidation engine - IMPLEMENTED
-pub fn halt_liquidation_engine() {
-    LIQUIDATION_ENGINE_HALTED.store(true, Ordering::SeqCst);
-    tracing::warn!("Liquidation engine HALTED");
-}
-
-/// Halt funding engine - IMPLEMENTED
-pub fn halt_funding_engine() {
-    FUNDING_ENGINE_HALTED.store(true, Ordering::SeqCst);
-    tracing::warn!("Funding engine HALTED");
-}
-
-/// Resume order processor - IMPLEMENTED
-pub fn resume_order_processor() {
-    ORDER_PROCESSOR_HALTED.store(false, Ordering::SeqCst);
-    tracing::info!("Order processor RESUMED");
-}
-
-/// Resume liquidation engine - IMPLEMENTED
-pub fn resume_liquidation_engine() {
-    LIQUIDATION_ENGINE_HALTED.store(false, Ordering::SeqCst);
-    tracing::info!("Liquidation engine RESUMED");
-}
-
-/// Resume funding engine - IMPLEMENTED
-pub fn resume_funding_engine() {
-    FUNDING_ENGINE_HALTED.store(false, Ordering::SeqCst);
-    tracing::info!("Funding engine RESUMED");
-}
-
-/// Check if order processor is halted
-pub fn is_order_processor_halted() -> bool {
-    ORDER_PROCESSOR_HALTED.load(Ordering::SeqCst)
-}
-
-/// Check if liquidation engine is halted
-pub fn is_liquidation_engine_halted() -> bool {
-    LIQUIDATION_ENGINE_HALTED.load(Ordering::SeqCst)
-}
-
-/// Check if funding engine is halted
-pub fn is_funding_engine_halted() -> bool {
-    FUNDING_ENGINE_HALTED.load(Ordering::SeqCst)
-}
-
 // Helper functions for system metrics
 fn get_memory_usage() -> u64 {
     // Platform-specific memory usage
-    0 // Placeholder - would use system APIs
+    #[cfg(target_os = "linux")]
+    {
+        use std::fs;
+        if let Ok(status) = fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if line.starts_with("VmRSS:") {
+                    if let Some(kb) = line.split_whitespace().nth(1) {
+                        if let Ok(kb_val) = kb.parse::<u64>() {
+                            return kb_val * 1024; // Convert to bytes
+                        }
+                    }
+                }
+            }
+        }
+    }
+    0 // Fallback if unable to read
 }
 
 fn get_thread_count() -> usize {
     // Platform-specific thread count
-    0 // Placeholder - would use system APIs
+    #[cfg(target_os = "linux")]
+    {
+        use std::fs;
+        if let Ok(status) = fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if line.starts_with("Threads:") {
+                    if let Some(count) = line.split_whitespace().nth(1) {
+                        if let Ok(count_val) = count.parse::<usize>() {
+                            return count_val;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    1 // Fallback
 }

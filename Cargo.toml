@@ -26,7 +26,7 @@ im = "15.1"  # Immutable data structures
 dashmap = "5.5"  # Concurrent HashMap
 
 # HTTP/WebSocket
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tower = "0.4"
 tower-http = "0.5"
 tokio-tungstenite = "0.21"
@@ -59,7 +59,11 @@ async-trait = "0.1.89"
 futures-util = "0.3.31"
 lazy_static = "1.5.0"
 sha2 = "0.11.0-rc.4"
-hex = "0.4.3"  # Benchmarking
+hex = "0.4.3"
+async-fs = "2.2.0"
+futures = "0.3.31"
+jsonwebtoken = "10.3.0"
+futures-lite = "2.6.1"  # Benchmarking
 
 [dev-dependencies]
 mockall = "0.12"

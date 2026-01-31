@@ -1,7 +1,8 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::error::{Error, Result};
 use crate::events::base::BaseEvent;
 use crate::events::liquidation::{LiquidationEvent, LiquidationType};
-use crate::events::order::Side;
+use crate::events::order::{OrderType, Side, TimeInForce};
 use crate::interfaces::balance_provider::BalanceProvider;
 use crate::liquidation::detector::LiquidationCandidate;
 use crate::liquidation::insurance_fund::InsuranceFund;
@@ -14,12 +15,17 @@ use crate::types::ids::MarketId;
 use crate::types::quantity::Quantity;
 use crate::types::timestamp::Timestamp;
 use std::time::Duration;
+use crate::LIQUIDATION_ENGINE_USER_ID;
+use crate::observability::metrics::{INSURANCE_FUND_BALANCE, LIQUIDATIONS_EXECUTED};
+use crate::types::position::Position;
+use crate::types::price::Price;
 
 pub struct LiquidationExecutor {
     queue: LiquidationPriorityQueue,
     rate_limiter: RateLimiter,
     insurance_fund: InsuranceFund,
     market_id: MarketId,
+    halted: AtomicBool,
 }
 
 impl LiquidationExecutor {
@@ -29,6 +35,7 @@ impl LiquidationExecutor {
             rate_limiter: RateLimiter::new(10, Duration::from_secs(1)),
             insurance_fund: InsuranceFund::new(),
             market_id,
+            halted: AtomicBool::new(false),
         }
     }
 
@@ -41,6 +48,12 @@ impl LiquidationExecutor {
         matcher: &mut Matcher,
         balance_provider: &mut dyn BalanceProvider,
     ) -> Result<Option<LiquidationEvent>> {
+
+        if self.halted.load(Ordering::SeqCst) {
+            tracing::warn!("LiquidationExecutor is halted, skipping execution");
+            return Ok(None);
+        }
+
         // Check rate limit
         if !self.rate_limiter.check_and_record() {
             return Err(Error::LiquidationRateLimitExceeded);
@@ -52,6 +65,12 @@ impl LiquidationExecutor {
             None => return Ok(None),
         };
 
+        // Calculate liquidation size (partial or full)
+        let liquidation_size = self.calculate_liquidation_size(
+            &candidate,
+            balance_provider,
+        )?;
+
         // Create liquidation order (opposite side of position)
         let liquidation_side = if candidate.position.is_long() {
             Side::Sell
@@ -61,20 +80,22 @@ impl LiquidationExecutor {
 
         let liquidation_order = Order {
             order_id: crate::utils::helper::generate_order_id(),
-            user_id: crate::LIQUIDATION_ENGINE_USER_ID,
+            user_id: *LIQUIDATION_ENGINE_USER_ID,
             side: liquidation_side,
+            order_type: OrderType::Limit,
             price: candidate.mark_price,
-            quantity: candidate.position.abs_size(),
+            quantity: liquidation_size,
             filled: Quantity::zero(),
             timestamp: Timestamp::now(),
-            time_in_force: crate::events::order::TimeInForce::IOC,
+            time_in_force: TimeInForce::IOC,
             reduce_only: false,
             post_only: false,
+            slippage_limit: None,
         };
 
         // Execute liquidation through matcher
         let trades = matcher.match_order(
-            liquidation_order,
+            &liquidation_order,
             balance_provider,
             candidate.mark_price,
         )?;
@@ -123,10 +144,97 @@ impl LiquidationExecutor {
         };
 
         // Observability: Record liquidation metrics
-        use crate::observability::metrics::*;
-        LIQUIDATIONS_EXECUTED.inc();
+        let liq_type = match liquidation_type {
+            LiquidationType::Full => "full",
+            LiquidationType::Partial => "partial",
+        };        LIQUIDATIONS_EXECUTED.with_label_values(&[liq_type]).inc();
         INSURANCE_FUND_BALANCE.set(self.insurance_fund.get_balance().to_i64());
 
         Ok(Some(event))
+    }
+
+    /// Calculate partial liquidation size to restore margin health
+    /// Per docs/architecture/liquidation-engine.md Section 4.1
+    fn calculate_partial_liquidation_size(
+        &self,
+        position: &Position,
+        balance: Balance,
+        mark_price: Price,
+    ) -> Quantity {
+        // Target: margin_ratio = 15% (above maintenance margin)
+        const TARGET_MARGIN_RATIO: f64 = 0.15;
+        const MIN_POSITION_SIZE: i64 = 1;
+
+        let position_value = position.abs_size().to_i64() * mark_price.to_i64();
+        let unrealized_pnl = (mark_price.to_i64() - position.entry_price.to_i64()) * position.size;
+        let collateral = balance.to_i64() + unrealized_pnl;
+
+        // Solve for liquidation_size:
+        // (collateral + liquidation_pnl) / (position_value - liquidation_value) = target_ratio
+        // Simplified: target_position_value = collateral / target_ratio
+        let target_position_value = (collateral as f64 / TARGET_MARGIN_RATIO) as i64;
+
+        if target_position_value <= 0 {
+            // Full liquidation required
+            return position.abs_size();
+        }
+
+        let liquidation_value = position_value - target_position_value;
+        let liquidation_size = liquidation_value / mark_price.to_i64();
+
+        // Clamp to position size
+        let clamped_size = liquidation_size.max(0).min(position.abs_size().to_i64());
+
+        // If remaining position would be too small, liquidate fully
+        let remaining_size = position.abs_size().to_i64() - clamped_size;
+        if remaining_size < MIN_POSITION_SIZE && remaining_size > 0 {
+            return position.abs_size();
+        }
+
+        Quantity::from_i64(clamped_size)
+    }
+
+    /// Determine liquidation size (partial or full)
+    fn calculate_liquidation_size(
+        &self,
+        candidate: &LiquidationCandidate,
+        balance_provider: &dyn BalanceProvider,
+    ) -> Result<Quantity> {
+        let account = balance_provider.get_account(candidate.user_id)?;
+
+        // If margin ratio is extremely low (< 5%), do full liquidation
+        const EMERGENCY_MARGIN_RATIO: f64 = 0.05;
+        if candidate.margin_ratio.to_f64() < EMERGENCY_MARGIN_RATIO {
+            return Ok(candidate.position.abs_size());
+        }
+
+        // Calculate partial liquidation size
+        let partial_size = self.calculate_partial_liquidation_size(
+            &candidate.position,
+            account.balance,
+            candidate.mark_price,
+        );
+
+        // If partial size >= 90% of position, do full liquidation
+        let position_size = candidate.position.abs_size().to_i64();
+        if partial_size.to_i64() >= (position_size * 9 / 10) {
+            return Ok(candidate.position.abs_size());
+        }
+
+        Ok(partial_size)
+    }
+
+    pub fn halt(&self) {
+        self.halted.store(true, Ordering::SeqCst);
+        tracing::warn!("LiquidationExecutor HALTED");
+    }
+
+    pub fn resume(&self) {
+        self.halted.store(false, Ordering::SeqCst);
+        tracing::info!("LiquidationExecutor RESUMED");
+    }
+
+    pub fn is_halted(&self) -> bool {
+        self.halted.load(Ordering::SeqCst)
     }
 }

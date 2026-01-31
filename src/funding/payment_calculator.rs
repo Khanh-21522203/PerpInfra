@@ -59,4 +59,23 @@ impl FundingPaymentCalculator {
         // Allow small rounding error (< 1 unit)
         sum.abs() < 1
     }
+
+    /// Ensure zero-sum by adjusting largest payment
+    /// Per docs/architecture/funding-engine.md Section 5.2
+    pub fn ensure_zero_sum(payments: &mut [FundingPayment]) {
+        let sum: i64 = payments.iter().map(|p| p.payment.to_i64()).sum();
+
+        if sum != 0 {
+            // Find largest absolute payment and adjust
+            if let Some(largest) = payments.iter_mut()
+                .max_by_key(|p| p.payment.to_i64().abs())
+            {
+                largest.payment = Balance::from_i64(largest.payment.to_i64() - sum);
+            }
+        }
+
+        // Verify final sum is zero
+        let final_sum: i64 = payments.iter().map(|p| p.payment.to_i64()).sum();
+        assert_eq!(final_sum, 0, "Funding payments must sum to zero after adjustment");
+    }
 }
